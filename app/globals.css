@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #0B1220;
+  --ink-2: #111A2E;
+  --panel: #141E36;
+  --panel-2: #1B2846;
+  --line: rgba(148,163,196,0.16);
+  --line-strong: rgba(148,163,196,0.32);
+  --text: #E7ECF7;
+  --text-dim: #93A0BE;
+  --text-faint: #5B6784;
+  --signal: #2DD4BF;
+  --signal-dim: rgba(45,212,191,0.14);
+  --absent: #FB7185;
+  --absent-dim: rgba(251,113,133,0.14);
+  --amber: #F5A524;
+}
+
+body {
+  background: var(--ink);
+  color: var(--text);
+}

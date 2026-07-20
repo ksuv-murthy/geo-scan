@@ -1,0 +1,349 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useParams } from "next/navigation";
+
+interface ScanRow {
+  query: string;
+  platformLabel: string;
+  text: string;
+  error: string | null;
+  mentioned: boolean;
+  compHits: string[];
+}
+interface FixDraft {
+  question: string;
+  answer: string;
+  schema: string;
+}
+interface CitationResult {
+  source: string;
+  found: boolean;
+  evidence?: string;
+  link?: string;
+  error?: string;
+}
+interface ScanResults {
+  platforms: string[];
+  rows: ScanRow[];
+  summary: { summary: string; recommendations: string[] } | null;
+  fixes: FixDraft[];
+  citation: CitationResult[];
+  ts: number;
+}
+interface Scan {
+  id: string;
+  business_name: string;
+  business_domain: string | null;
+  payment_status: string;
+  scan_status: string;
+  results: ScanResults | null;
+}
+
+export default function ReportPage() {
+  const params = useParams();
+  const scanId = params.id as string;
+  const [scan, setScan] = useState<Scan | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [publishOpen, setPublishOpen] = useState<number | null>(null);
+  const [wpForm, setWpForm] = useState({ siteUrl: "", username: "", appPassword: "" });
+  const [publishStatus, setPublishStatus] = useState<Record<number, string>>({});
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  const fetchStatus = useCallback(async () => {
+    const res = await fetch(`/api/scan/status?scanId=${scanId}`);
+    const data = await res.json();
+    if (res.ok) setScan(data.scan);
+    return data.scan as Scan | undefined;
+  }, [scanId]);
+
+  const triggerRun = useCallback(async () => {
+    try {
+      const res = await fetch("/api/scan/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scanId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Scan failed");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+  }, [scanId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval>;
+
+    async function init() {
+      const s = await fetchStatus();
+      if (!s) return;
+      if (s.payment_status !== "paid") {
+        setErrorMsg("This scan hasn't been paid for yet.");
+        setLoading(false);
+        return;
+      }
+      if (s.scan_status === "not_started") {
+        triggerRun();
+      }
+      interval = setInterval(async () => {
+        const latest = await fetchStatus();
+        if (cancelled || !latest) return;
+        if (latest.scan_status === "complete" || latest.scan_status === "error") {
+          clearInterval(interval);
+          setLoading(false);
+        }
+      }, 3000);
+    }
+    init();
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanId]);
+
+  async function publishFix(fixIndex: number, destination: "wordpress" | "hosted_page" | "copy_paste") {
+    setPublishStatus((s) => ({ ...s, [fixIndex]: "publishing" }));
+    try {
+      const res = await fetch("/api/scan/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scanId,
+          fixIndex,
+          destination,
+          wordpress: destination === "wordpress" ? wpForm : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Publish failed");
+      if (destination === "copy_paste") {
+        await navigator.clipboard.writeText(data.publish.destination_meta.block);
+        setCopiedIndex(fixIndex);
+        setTimeout(() => setCopiedIndex(null), 1800);
+      }
+      setPublishStatus((s) => ({ ...s, [fixIndex]: "done" }));
+    } catch (err) {
+      setPublishStatus((s) => ({ ...s, [fixIndex]: `error: ${err instanceof Error ? err.message : String(err)}` }));
+    }
+  }
+
+  if (errorMsg && !scan?.results) {
+    return (
+      <div className="max-w-2xl mx-auto px-6 py-16 text-center">
+        <p className="text-red-400 text-sm">{errorMsg}</p>
+        <a href="/" className="text-teal-400 underline text-sm mt-4 inline-block">
+          Back to start
+        </a>
+      </div>
+    );
+  }
+
+  if (loading || !scan?.results) {
+    return (
+      <div className="max-w-2xl mx-auto px-6 py-24 text-center">
+        <div className="font-mono text-sm text-teal-400 mb-3">GEO SCAN</div>
+        <h1 className="text-lg font-medium mb-2">Running your scan…</h1>
+        <p className="text-[#93A0BE] text-sm">
+          Checking Claude, ChatGPT, Gemini, and Perplexity, plus your India citation footprint. This takes about a
+          minute.
+        </p>
+      </div>
+    );
+  }
+
+  const r = scan.results;
+  const platformStats: Record<string, { total: number; hit: number }> = {};
+  r.platforms.forEach((pl) => (platformStats[pl] = { total: 0, hit: 0 }));
+  r.rows.forEach((row) => {
+    if (row.error) return;
+    platformStats[row.platformLabel].total++;
+    if (row.mentioned) platformStats[row.platformLabel].hit++;
+  });
+  const totalHit = r.rows.filter((row) => !row.error && row.mentioned).length;
+  const totalChecked = r.rows.filter((row) => !row.error).length;
+  const overallPct = totalChecked ? Math.round((100 * totalHit) / totalChecked) : 0;
+
+  return (
+    <div className="max-w-4xl mx-auto px-6 py-12 w-full">
+      <div className="flex items-center justify-between mb-8 pb-6 border-b border-[#1f2a45]">
+        <div>
+          <div className="font-mono text-xs text-teal-400 mb-1">GEO SCAN</div>
+          <h1 className="text-xl font-semibold">{scan.business_name}</h1>
+        </div>
+        <button onClick={() => window.print()} className="text-xs border border-[#1f2a45] rounded-md px-3 py-1.5 text-[#93A0BE]">
+          Print / Save PDF
+        </button>
+      </div>
+
+      <div className="flex items-center gap-6 bg-[#1B2846] border border-[#1f2a45] rounded-2xl p-6 mb-6">
+        <div className="text-3xl font-mono font-bold" style={{ color: overallPct >= 50 ? "#2DD4BF" : overallPct > 0 ? "#F5A524" : "#FB7185" }}>
+          {overallPct}%
+        </div>
+        <div>
+          <h2 className="font-medium mb-1">Overall AI visibility</h2>
+          <p className="text-sm text-[#93A0BE]">
+            Mentioned in {totalHit} of {totalChecked} checks across {r.platforms.join(", ")}.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+        {r.platforms.map((pl) => {
+          const s = platformStats[pl];
+          const pct = s.total ? Math.round((100 * s.hit) / s.total) : 0;
+          const color = pct >= 50 ? "#2DD4BF" : pct > 0 ? "#F5A524" : "#FB7185";
+          return (
+            <div key={pl} className="bg-[#141E36] border border-[#1f2a45] rounded-xl p-4">
+              <div className="font-mono text-[10px] uppercase text-[#93A0BE] mb-2">{pl}</div>
+              <div className="text-2xl font-mono font-bold" style={{ color }}>
+                {s.total ? `${pct}%` : "—"}
+              </div>
+              <div className="text-[11px] text-[#5B6784] mt-1">{s.hit} of {s.total} mentioned</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {r.summary && (
+        <div className="bg-[#1B2846] border border-[#1f2a45] rounded-2xl p-6 mb-8">
+          <h3 className="font-medium mb-2">What this means</h3>
+          <p className="text-sm text-[#93A0BE] mb-4 leading-relaxed">{r.summary.summary}</p>
+          <ol className="list-decimal list-inside space-y-1.5 text-sm">
+            {r.summary.recommendations.map((rec, i) => (
+              <li key={i}>{rec}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      <div className="bg-[#141E36] border border-[#1f2a45] rounded-2xl p-6 mb-8">
+        <h3 className="font-medium mb-4">India citation footprint</h3>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {r.citation?.map((c) => (
+            <div key={c.source} className="flex items-center justify-between text-sm border border-[#1f2a45] rounded-lg px-3 py-2">
+              <span>{c.source}</span>
+              <span className={c.found ? "text-teal-400" : "text-red-400"}>{c.found ? "Found" : c.error ? "—" : "Not found"}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-[#141E36] border border-[#1f2a45] rounded-2xl p-6 mb-8 overflow-x-auto">
+        <h3 className="font-medium mb-4">Full results</h3>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[10px] uppercase text-[#5B6784] border-b border-[#1f2a45]">
+              <th className="pb-2 pr-3">Query</th>
+              <th className="pb-2 pr-3">Platform</th>
+              <th className="pb-2">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {r.rows.map((row, i) => (
+              <tr key={i} className="border-b border-[#1f2a45] align-top">
+                <td className="py-2.5 pr-3 max-w-[240px]">{row.query}</td>
+                <td className="py-2.5 pr-3 font-mono text-xs text-[#93A0BE] whitespace-nowrap">{row.platformLabel}</td>
+                <td className="py-2.5">
+                  <span
+                    className="inline-flex text-[11px] font-mono px-2 py-0.5 rounded-full"
+                    style={{
+                      background: row.error ? "rgba(148,163,196,0.16)" : row.mentioned ? "rgba(45,212,191,0.14)" : "rgba(251,113,133,0.14)",
+                      color: row.error ? "#5B6784" : row.mentioned ? "#2DD4BF" : "#FB7185",
+                    }}
+                  >
+                    {row.error ? "error" : row.mentioned ? "mentioned" : "absent"}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {r.fixes?.length > 0 && (
+        <div className="bg-[#1B2846] border border-[#1f2a45] rounded-2xl p-6">
+          <h3 className="font-medium mb-1">Ready to ship — content for the biggest gaps</h3>
+          <p className="text-sm text-[#93A0BE] mb-5">
+            Drafted from your scan data. Push straight to WordPress, get a hosted page we host for you, or copy-paste
+            it anywhere — Canva, Google Business Q&amp;A, any site builder.
+          </p>
+          <div className="space-y-4">
+            {r.fixes.map((f, i) => (
+              <div key={i} className="bg-[#111A2E] border border-[#1f2a45] rounded-xl p-4">
+                <div className="font-mono text-[11px] text-[#5B6784] mb-2">GAP {i + 1} — &quot;{f.question}&quot;</div>
+                <p className="text-sm mb-3">{f.answer}</p>
+                <details className="mb-3">
+                  <summary className="text-[11px] text-[#5B6784] cursor-pointer font-mono">view FAQ schema (JSON-LD)</summary>
+                  <pre className="text-[10px] text-[#93A0BE] whitespace-pre-wrap mt-2 bg-[#0B1220] p-2 rounded">{f.schema}</pre>
+                </details>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setPublishOpen(publishOpen === i ? null : i)}
+                    className="text-xs border border-[#1f2a45] rounded-md px-3 py-1.5 hover:border-[#33436b]"
+                  >
+                    Publish to WordPress
+                  </button>
+                  <button
+                    onClick={() => publishFix(i, "hosted_page")}
+                    className="text-xs border border-[#1f2a45] rounded-md px-3 py-1.5 hover:border-[#33436b]"
+                  >
+                    Host this page for me
+                  </button>
+                  <button
+                    onClick={() => publishFix(i, "copy_paste")}
+                    className="text-xs border border-[#1f2a45] rounded-md px-3 py-1.5 hover:border-[#33436b]"
+                  >
+                    {copiedIndex === i ? "Copied ✓" : "Copy answer + schema"}
+                  </button>
+                </div>
+
+                {publishOpen === i && (
+                  <div className="mt-3 space-y-2 border-t border-[#1f2a45] pt-3">
+                    <input
+                      placeholder="https://yoursite.com"
+                      value={wpForm.siteUrl}
+                      onChange={(e) => setWpForm((s) => ({ ...s, siteUrl: e.target.value }))}
+                      className="w-full bg-[#0B1220] border border-[#1f2a45] rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-teal-400"
+                    />
+                    <input
+                      placeholder="WordPress username"
+                      value={wpForm.username}
+                      onChange={(e) => setWpForm((s) => ({ ...s, username: e.target.value }))}
+                      className="w-full bg-[#0B1220] border border-[#1f2a45] rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-teal-400"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Application password"
+                      value={wpForm.appPassword}
+                      onChange={(e) => setWpForm((s) => ({ ...s, appPassword: e.target.value }))}
+                      className="w-full bg-[#0B1220] border border-[#1f2a45] rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-teal-400"
+                    />
+                    <p className="text-[10px] text-[#5B6784] leading-relaxed">
+                      Create this in the client&apos;s WP admin: Users → Profile → Application Passwords.
+                    </p>
+                    <button
+                      onClick={() => publishFix(i, "wordpress")}
+                      className="text-xs bg-teal-400 text-[#052420] font-medium rounded-md px-3 py-1.5"
+                    >
+                      Publish now
+                    </button>
+                  </div>
+                )}
+
+                {publishStatus[i] && (
+                  <p className={`text-[11px] mt-2 ${publishStatus[i].startsWith("error") ? "text-red-400" : "text-teal-400"}`}>
+                    {publishStatus[i] === "publishing" ? "Publishing…" : publishStatus[i] === "done" ? "Published ✓" : publishStatus[i]}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
