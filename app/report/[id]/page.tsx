@@ -50,6 +50,9 @@ export default function ReportPage() {
   const [wpForm, setWpForm] = useState({ siteUrl: "", username: "", appPassword: "" });
   const [publishStatus, setPublishStatus] = useState<Record<number, string>>({});
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [wpConnectOpen, setWpConnectOpen] = useState(false);
+  const [fixingAll, setFixingAll] = useState(false);
+  const [fixAllSummary, setFixAllSummary] = useState<string | null>(null);
 
   const fetchStatus = useCallback(async () => {
     const res = await fetch(`/api/scan/status?scanId=${scanId}`);
@@ -104,7 +107,10 @@ export default function ReportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanId]);
 
-  async function publishFix(fixIndex: number, destination: "wordpress" | "hosted_page" | "copy_paste") {
+  async function publishFix(
+    fixIndex: number,
+    destination: "wordpress" | "hosted_page" | "copy_paste"
+  ): Promise<boolean> {
     setPublishStatus((s) => ({ ...s, [fixIndex]: "publishing" }));
     try {
       const res = await fetch("/api/scan/publish", {
@@ -125,9 +131,48 @@ export default function ReportPage() {
         setTimeout(() => setCopiedIndex(null), 1800);
       }
       setPublishStatus((s) => ({ ...s, [fixIndex]: "done" }));
+      return true;
     } catch (err) {
       setPublishStatus((s) => ({ ...s, [fixIndex]: `error: ${err instanceof Error ? err.message : String(err)}` }));
+      return false;
     }
+  }
+
+  // One-click automation: publishes every drafted fix in one action instead
+  // of clicking publish per-fix. Uses WordPress if credentials are filled
+  // in above; any fix that fails there (or when no WP is connected at all)
+  // automatically falls back to a hosted page, so nothing is left undone.
+  async function fixEverything() {
+    if (!scan?.results?.fixes?.length) return;
+    setFixingAll(true);
+    setFixAllSummary(null);
+    const wpConnected = !!(wpForm.siteUrl && wpForm.username && wpForm.appPassword);
+    let wpCount = 0;
+    let hostedCount = 0;
+
+    for (let i = 0; i < scan.results.fixes.length; i++) {
+      if (wpConnected) {
+        const ok = await publishFix(i, "wordpress");
+        if (ok) {
+          wpCount++;
+          continue;
+        }
+      }
+      const ok = await publishFix(i, "hosted_page");
+      if (ok) hostedCount++;
+    }
+
+    const total = scan.results.fixes.length;
+    const parts: string[] = [];
+    if (wpCount) parts.push(`${wpCount} to WordPress`);
+    if (hostedCount) parts.push(`${hostedCount} to hosted pages`);
+    const published = wpCount + hostedCount;
+    setFixAllSummary(
+      published === total
+        ? `All ${total} fixes published (${parts.join(", ")}).`
+        : `${published} of ${total} fixes published (${parts.join(", ") || "none"}). Check individual fixes below for errors.`
+    );
+    setFixingAll(false);
   }
 
   if (errorMsg && !scan?.results) {
@@ -266,10 +311,55 @@ export default function ReportPage() {
       {r.fixes?.length > 0 && (
         <div className="bg-[#1B2846] border border-[#1f2a45] rounded-2xl p-6">
           <h3 className="font-medium mb-1">Ready to ship — content for the biggest gaps</h3>
-          <p className="text-sm text-[#93A0BE] mb-5">
-            Drafted from your scan data. Push straight to WordPress, get a hosted page we host for you, or copy-paste
-            it anywhere — Canva, Google Business Q&amp;A, any site builder.
+          <p className="text-sm text-[#93A0BE] mb-4">
+            Drafted from your scan data. Fix everything in one click, or review and publish each one individually
+            below — to WordPress, a hosted page we host for you, or copy-paste anywhere (Canva, Google Business
+            Q&amp;A, any site builder).
           </p>
+
+          <div className="bg-[#111A2E] border border-[#1f2a45] rounded-xl p-4 mb-5">
+            <button
+              onClick={() => setWpConnectOpen(!wpConnectOpen)}
+              className="text-xs text-[#93A0BE] underline mb-2"
+            >
+              {wpConnectOpen ? "Hide" : "Have WordPress? Connect it"} (optional — otherwise fixes go to hosted pages)
+            </button>
+            {wpConnectOpen && (
+              <div className="space-y-2 mt-2">
+                <input
+                  placeholder="https://yoursite.com"
+                  value={wpForm.siteUrl}
+                  onChange={(e) => setWpForm((s) => ({ ...s, siteUrl: e.target.value }))}
+                  className="w-full bg-[#0B1220] border border-[#1f2a45] rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-teal-400"
+                />
+                <input
+                  placeholder="WordPress username"
+                  value={wpForm.username}
+                  onChange={(e) => setWpForm((s) => ({ ...s, username: e.target.value }))}
+                  className="w-full bg-[#0B1220] border border-[#1f2a45] rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-teal-400"
+                />
+                <input
+                  type="password"
+                  placeholder="Application password"
+                  value={wpForm.appPassword}
+                  onChange={(e) => setWpForm((s) => ({ ...s, appPassword: e.target.value }))}
+                  className="w-full bg-[#0B1220] border border-[#1f2a45] rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-teal-400"
+                />
+                <p className="text-[10px] text-[#5B6784] leading-relaxed">
+                  Create this in the client&apos;s WP admin: Users → Profile → Application Passwords.
+                </p>
+              </div>
+            )}
+            <button
+              onClick={fixEverything}
+              disabled={fixingAll}
+              className="w-full mt-3 bg-teal-400 hover:bg-teal-300 disabled:opacity-50 text-[#052420] font-semibold rounded-lg py-2.5 text-sm transition"
+            >
+              {fixingAll ? "Publishing all fixes…" : `Fix everything (${r.fixes.length})`}
+            </button>
+            {fixAllSummary && <p className="text-[11px] text-teal-400 mt-2">{fixAllSummary}</p>}
+          </div>
+
           <div className="space-y-4">
             {r.fixes.map((f, i) => (
               <div key={i} className="bg-[#111A2E] border border-[#1f2a45] rounded-xl p-4">
