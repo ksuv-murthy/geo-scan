@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import Razorpay from "razorpay";
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
 
-// Creates a pending scan row + a Razorpay order for the flat Rs 299 fee.
-// Payment happens before the scan runs (agreed flow), so nothing here calls
-// any AI platform yet — this just reserves the scan and returns checkout info.
+// Creates a scan row, then either:
+//  - marks it paid immediately for free (first scan for this email — a
+//    genuine growth offer, not just a test bypass), or
+//  - creates a Razorpay order for the flat Rs 299 fee (every scan after the
+//    first one from the same email).
+// Either way, nothing here calls any AI platform yet — the actual scan is
+// triggered from the report page once payment_status is 'paid'.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -20,6 +24,15 @@ export async function POST(req: NextRequest) {
     const supabase = createSupabaseServiceClient();
     const AMOUNT_PAISE = 29900; // Rs 299.00 flat
 
+    // Has this email ever had a paid (or free-first) scan before?
+    const { count: priorPaidCount } = await supabase
+      .from("scans")
+      .select("id", { count: "exact", head: true })
+      .eq("email", email)
+      .eq("payment_status", "paid");
+
+    const isFreeFirstScan = (priorPaidCount || 0) === 0;
+
     const { data: scan, error: dbError } = await supabase
       .from("scans")
       .insert({
@@ -29,8 +42,8 @@ export async function POST(req: NextRequest) {
         business_desc: businessDesc || null,
         competitors: competitors || [],
         queries,
-        amount_paise: AMOUNT_PAISE,
-        payment_status: "pending",
+        amount_paise: isFreeFirstScan ? 0 : AMOUNT_PAISE,
+        payment_status: isFreeFirstScan ? "paid" : "pending",
         scan_status: "not_started",
       })
       .select()
@@ -38,12 +51,20 @@ export async function POST(req: NextRequest) {
 
     if (dbError) throw dbError;
 
+    if (isFreeFirstScan) {
+      return NextResponse.json({
+        scanId: scan.id,
+        free: true,
+      });
+    }
+
     // If Razorpay keys aren't configured yet (placeholder mode), return the
     // scan without a real order — the frontend should show a "payments not
     // yet live" state rather than crash.
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
       return NextResponse.json({
         scanId: scan.id,
+        free: false,
         razorpayConfigured: false,
       });
     }
@@ -64,6 +85,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       scanId: scan.id,
+      free: false,
       razorpayConfigured: true,
       orderId: order.id,
       amount: AMOUNT_PAISE,

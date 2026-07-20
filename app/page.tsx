@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 declare global {
@@ -20,6 +20,35 @@ export default function HomePage() {
   const [suggesting, setSuggesting] = useState(false);
   const [paying, setPaying] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [freeScanAvailable, setFreeScanAvailable] = useState<boolean | null>(null);
+  const eligibilityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Check free-scan eligibility as the user finishes typing their email —
+  // first scan for any email is free, every scan after that is Rs 299.
+  useEffect(() => {
+    if (eligibilityTimer.current) clearTimeout(eligibilityTimer.current);
+    const trimmed = email.trim();
+    if (!trimmed.includes("@")) {
+      setFreeScanAvailable(null);
+      return;
+    }
+    eligibilityTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/scan/check-eligibility", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: trimmed }),
+        });
+        const data = await res.json();
+        if (res.ok) setFreeScanAvailable(data.freeScanAvailable);
+      } catch {
+        setFreeScanAvailable(null);
+      }
+    }, 500);
+    return () => {
+      if (eligibilityTimer.current) clearTimeout(eligibilityTimer.current);
+    };
+  }, [email]);
 
   function updateQuery(i: number, value: string) {
     setQueries((qs) => qs.map((q, idx) => (idx === i ? value : q)));
@@ -93,6 +122,11 @@ export default function HomePage() {
       const created = await createRes.json();
       if (!createRes.ok) throw new Error(created.error || "Could not start scan");
 
+      if (created.free) {
+        router.push(`/report/${created.scanId}?email=${encodeURIComponent(email)}`);
+        return;
+      }
+
       if (!created.razorpayConfigured) {
         setErrorMsg(
           "Payments aren't live yet on this deployment (Razorpay keys not configured). Your scan was saved as a draft."
@@ -157,7 +191,7 @@ export default function HomePage() {
         <p className="text-[#93A0BE] text-sm leading-relaxed">
           Check whether ChatGPT, Gemini, Perplexity, and Claude mention your business when a real buyer asks —
           plus your visibility on JustDial, IndiaMART, Practo, Quora, and Google Business. Get ready-to-publish
-          fixes for the gaps. ₹299, one report.
+          fixes for the gaps. First scan free, ₹299 after that.
         </p>
       </div>
 
@@ -261,8 +295,15 @@ export default function HomePage() {
           disabled={paying}
           className="w-full bg-teal-400 hover:bg-teal-300 disabled:opacity-50 text-[#052420] font-semibold rounded-lg py-3 text-sm transition"
         >
-          {paying ? "Opening checkout..." : "Pay ₹299 & run scan"}
+          {paying
+            ? "Starting scan..."
+            : freeScanAvailable
+            ? "Run free scan"
+            : "Pay ₹299 & run scan"}
         </button>
+        {freeScanAvailable && (
+          <p className="text-center text-[11px] text-teal-400">Your first scan is free — no payment needed.</p>
+        )}
         <p className="text-center text-[11px] text-[#5B6784]">
           Already paid?{" "}
           <a href="/dashboard" className="text-teal-400 underline">
