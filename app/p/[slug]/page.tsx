@@ -1,4 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
+import { buildFixHtml } from "@/lib/publish-engine";
 import { notFound } from "next/navigation";
 
 // Hosted fallback page: for businesses with no editable site (no CMS, a
@@ -26,21 +27,21 @@ export default async function HostedFixPage({
   const fix = await getFix(publish.scan_id, publish.fix_index);
   if (!fix) return notFound();
 
+  // Same buildFixHtml() fragment used for WordPress and the copy-paste HTML
+  // variant, so the hosted page isn't a fourth slightly-different template —
+  // one source of truth for what the "final" published markup looks like.
+  const html = buildFixHtml({
+    businessName: scan.business_name,
+    businessDomain: scan.business_domain,
+    question: fix.question,
+    answer: fix.answer,
+    schema: fix.schema,
+  });
+
   return (
     <main className="max-w-2xl mx-auto px-6 py-16">
-      <p className="text-sm text-zinc-500 mb-2">{scan.business_name}</p>
-      <h1 className="text-2xl font-semibold mb-4">{fix.question}</h1>
-      <p className="text-zinc-700 leading-relaxed">{fix.answer}</p>
-      {scan.business_domain && (
-        <a
-          href={`https://${scan.business_domain.replace(/^https?:\/\//, "")}`}
-          className="inline-block mt-8 text-sm text-teal-700 underline"
-        >
-          Visit {scan.business_name} →
-        </a>
-      )}
       {/* eslint-disable-next-line react/no-danger */}
-      <div dangerouslySetInnerHTML={{ __html: fix.schema }} />
+      <div dangerouslySetInnerHTML={{ __html: html }} />
     </main>
   );
 }
