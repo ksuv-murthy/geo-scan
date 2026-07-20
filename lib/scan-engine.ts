@@ -197,15 +197,17 @@ export async function generateFixes(
   desc: string,
   gapQueries: string[]
 ): Promise<FixDraft[]> {
-  const fixes: FixDraft[] = [];
-  for (const gq of gapQueries) {
+  // Runs in parallel — sequential Claude calls here were adding meaningful
+  // time to a route that already has to fit inside Vercel's function
+  // duration limit.
+  const drafts = gapQueries.map(async (gq) => {
     const prompt = `A business called "${name}" (${desc || "no description given"}) is NOT showing up when AI platforms answer this real buyer question: "${gq}".
 Write content that would genuinely help them get cited/mentioned for this exact question, in the voice of the business's own website. Return ONLY JSON in this shape:
 {"question": "${gq.replace(/"/g, '\\"')}", "answer": "a direct, factual, 60-90 word answer written as if it's an FAQ block on the business's website — specific, not vague marketing fluff", "schema": "a single-entry FAQPage JSON-LD <script> tag as a string, using the question and answer above, ready to paste into <head>"}`;
     const out = await askClaude(prompt, 700);
-    fixes.push(extractJson(out) as FixDraft);
-  }
-  return fixes;
+    return extractJson(out) as FixDraft;
+  });
+  return Promise.all(drafts);
 }
 
 // ---- India citation graph (JustDial / IndiaMART / Practo / Quora / GMB) ----

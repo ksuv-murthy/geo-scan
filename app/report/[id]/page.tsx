@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 
 interface ScanRow {
@@ -187,16 +187,7 @@ export default function ReportPage() {
   }
 
   if (loading || !scan?.results) {
-    return (
-      <div className="max-w-2xl mx-auto px-6 py-24 text-center">
-        <div className="font-mono text-sm text-teal-400 mb-3">GEO SCAN</div>
-        <h1 className="text-lg font-medium mb-2">Running your scan…</h1>
-        <p className="text-[#93A0BE] text-sm">
-          Checking Claude, ChatGPT, Gemini, and Perplexity, plus your India citation footprint. This takes about a
-          minute.
-        </p>
-      </div>
-    );
+    return <ScanningState />;
   }
 
   const r = scan.results;
@@ -434,6 +425,117 @@ export default function ReportPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------- Scanning animation ----------
+// A real progress signal instead of static "please wait" text — a scan
+// genuinely takes 20-40+ seconds (multiple AI platforms, sequential-feeling
+// work under the hood), and a motionless screen reads as frozen well before
+// that. This sweeps through each platform being checked plus a rotating
+// status line, so there's always something visibly moving.
+const SCAN_PLATFORMS = [
+  { label: "Claude", color: "#2DD4BF" },
+  { label: "ChatGPT", color: "#F5A524" },
+  { label: "Gemini", color: "#818CF8" },
+  { label: "Perplexity", color: "#FB7185" },
+];
+
+const SCAN_STATUS_LINES = [
+  "Asking real buyer-intent questions…",
+  "Checking who gets mentioned…",
+  "Cross-referencing competitors…",
+  "Scanning JustDial, IndiaMART, Practo…",
+  "Checking your Google Business footprint…",
+  "Drafting fixes for the biggest gaps…",
+];
+
+function ScanningState() {
+  const [activePlatform, setActivePlatform] = useState(0);
+  const [statusLine, setStatusLine] = useState(0);
+  const [dotAngle, setDotAngle] = useState(0);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const platformTimer = setInterval(() => {
+      setActivePlatform((p) => (p + 1) % SCAN_PLATFORMS.length);
+    }, 1400);
+    const statusTimer = setInterval(() => {
+      setStatusLine((s) => (s + 1) % SCAN_STATUS_LINES.length);
+    }, 2600);
+
+    let start: number | null = null;
+    function tick(ts: number) {
+      if (start === null) start = ts;
+      const elapsed = ts - start;
+      setDotAngle((elapsed / 1000) * 90); // 90deg/sec sweep
+      rafRef.current = requestAnimationFrame(tick);
+    }
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      clearInterval(platformTimer);
+      clearInterval(statusTimer);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  const sweepX = 50 + 42 * Math.cos((dotAngle * Math.PI) / 180);
+  const sweepY = 50 + 42 * Math.sin((dotAngle * Math.PI) / 180);
+
+  return (
+    <div className="max-w-2xl mx-auto px-6 py-20 text-center">
+      <div className="font-mono text-xs text-teal-400 mb-8 tracking-widest">GEO SCAN</div>
+
+      <div className="relative w-44 h-44 mx-auto mb-8">
+        <svg viewBox="0 0 100 100" className="w-full h-full">
+          <defs>
+            <radialGradient id="sweepFade" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#2DD4BF" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="#2DD4BF" stopOpacity="0" />
+            </radialGradient>
+          </defs>
+          {[42, 30, 18].map((r) => (
+            <circle key={r} cx="50" cy="50" r={r} fill="none" stroke="#1f2a45" strokeWidth="1" />
+          ))}
+          <line x1="50" y1="8" x2="50" y2="92" stroke="#1f2a45" strokeWidth="0.5" />
+          <line x1="8" y1="50" x2="92" y2="50" stroke="#1f2a45" strokeWidth="0.5" />
+          <path
+            d={`M 50 50 L ${sweepX} ${sweepY} A 42 42 0 0 1 ${
+              50 + 42 * Math.cos(((dotAngle - 40) * Math.PI) / 180)
+            } ${50 + 42 * Math.sin(((dotAngle - 40) * Math.PI) / 180)} Z`}
+            fill="url(#sweepFade)"
+          />
+          <circle cx={sweepX} cy={sweepY} r="2.2" fill="#2DD4BF" />
+          <circle cx="50" cy="50" r="3" fill="#0B1220" stroke="#2DD4BF" strokeWidth="1.5" />
+        </svg>
+      </div>
+
+      <div className="flex items-center justify-center gap-2 mb-6">
+        {SCAN_PLATFORMS.map((p, i) => (
+          <div
+            key={p.label}
+            className="px-3 py-1.5 rounded-full text-xs font-mono border transition-all duration-500"
+            style={{
+              borderColor: i === activePlatform ? p.color : "#1f2a45",
+              color: i === activePlatform ? p.color : "#5B6784",
+              background: i === activePlatform ? `${p.color}1a` : "transparent",
+              transform: i === activePlatform ? "scale(1.08)" : "scale(1)",
+            }}
+          >
+            {p.label}
+          </div>
+        ))}
+      </div>
+
+      <h1 className="text-lg font-medium mb-2">Running your scan…</h1>
+      <p className="text-[#93A0BE] text-sm h-5 transition-opacity duration-300">
+        {SCAN_STATUS_LINES[statusLine]}
+      </p>
+      <p className="text-[#5B6784] text-[11px] mt-6">
+        This usually takes 20-40 seconds. Feel free to leave this open — it&apos;ll update automatically.
+      </p>
     </div>
   );
 }

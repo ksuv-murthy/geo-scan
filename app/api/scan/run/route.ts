@@ -13,6 +13,13 @@ import {
 // platforms, the India citation-check, an AI-written summary, and drafted
 // fixes for the biggest visibility gaps. Gated on payment_status = 'paid' —
 // this is the one route that actually spends money on AI/SerpApi calls.
+//
+// All platform checks run in parallel (not sequentially) to fit inside
+// Vercel's function time limit — 32+ sequential AI calls would blow past
+// even the extended duration below. maxDuration below requests the longest
+// allowance available; Hobby plans cap at 60s regardless of this setting.
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   let scanId: string | undefined;
   try {
@@ -43,12 +50,13 @@ export async function POST(req: NextRequest) {
     const queries: string[] = scan.queries || [];
     const competitors: string[] = scan.competitors || [];
 
-    const rows = [];
+    const checks: Promise<ReturnType<typeof runPlatformCheck> extends Promise<infer T> ? T : never>[] = [];
     for (const q of queries) {
       for (const p of platforms) {
-        rows.push(await runPlatformCheck(p, q, scan.business_name, scan.business_domain, competitors));
+        checks.push(runPlatformCheck(p, q, scan.business_name, scan.business_domain, competitors));
       }
     }
+    const rows = await Promise.all(checks);
 
     const summary = await generateSummary(scan.business_name, scan.business_desc, competitors, rows);
 
