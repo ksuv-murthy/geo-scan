@@ -48,7 +48,9 @@ export default function ReportPage() {
   const [errorMsg, setErrorMsg] = useState("");
   const [publishOpen, setPublishOpen] = useState<number | null>(null);
   const [wpForm, setWpForm] = useState({ siteUrl: "", username: "", appPassword: "" });
-  const [publishStatus, setPublishStatus] = useState<Record<number, string>>({});
+  const [publishStatus, setPublishStatus] = useState<
+    Record<number, { state: "publishing" | "done" | "error"; message?: string; link?: string; linkLabel?: string }>
+  >({});
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [wpConnectOpen, setWpConnectOpen] = useState(false);
   const [fixingAll, setFixingAll] = useState(false);
@@ -111,7 +113,7 @@ export default function ReportPage() {
     fixIndex: number,
     destination: "wordpress" | "hosted_page" | "copy_paste"
   ): Promise<boolean> {
-    setPublishStatus((s) => ({ ...s, [fixIndex]: "publishing" }));
+    setPublishStatus((s) => ({ ...s, [fixIndex]: { state: "publishing" } }));
     try {
       const res = await fetch("/api/scan/publish", {
         method: "POST",
@@ -125,15 +127,31 @@ export default function ReportPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Publish failed");
+
+      const meta = data.publish?.destination_meta || {};
       if (destination === "copy_paste") {
-        await navigator.clipboard.writeText(data.publish.destination_meta.block);
+        await navigator.clipboard.writeText(meta.block);
         setCopiedIndex(fixIndex);
         setTimeout(() => setCopiedIndex(null), 1800);
+        setPublishStatus((s) => ({ ...s, [fixIndex]: { state: "done" } }));
+      } else if (destination === "wordpress") {
+        setPublishStatus((s) => ({
+          ...s,
+          [fixIndex]: { state: "done", link: meta.editLink, linkLabel: "Review draft in WordPress" },
+        }));
+      } else if (destination === "hosted_page") {
+        const fullUrl = meta.url ? `${window.location.origin}${meta.url}` : undefined;
+        setPublishStatus((s) => ({
+          ...s,
+          [fixIndex]: { state: "done", link: fullUrl, linkLabel: "View live page" },
+        }));
       }
-      setPublishStatus((s) => ({ ...s, [fixIndex]: "done" }));
       return true;
     } catch (err) {
-      setPublishStatus((s) => ({ ...s, [fixIndex]: `error: ${err instanceof Error ? err.message : String(err)}` }));
+      setPublishStatus((s) => ({
+        ...s,
+        [fixIndex]: { state: "error", message: err instanceof Error ? err.message : String(err) },
+      }));
       return false;
     }
   }
@@ -416,9 +434,28 @@ export default function ReportPage() {
                 )}
 
                 {publishStatus[i] && (
-                  <p className={`text-[11px] mt-2 ${publishStatus[i].startsWith("error") ? "text-red-400" : "text-teal-400"}`}>
-                    {publishStatus[i] === "publishing" ? "Publishing…" : publishStatus[i] === "done" ? "Published ✓" : publishStatus[i]}
-                  </p>
+                  <div className={`text-[11px] mt-2 ${publishStatus[i].state === "error" ? "text-red-400" : "text-teal-400"}`}>
+                    {publishStatus[i].state === "publishing" && "Publishing…"}
+                    {publishStatus[i].state === "error" && `Error: ${publishStatus[i].message}`}
+                    {publishStatus[i].state === "done" && (
+                      <span>
+                        Published ✓
+                        {publishStatus[i].link && (
+                          <>
+                            {" — "}
+                            <a
+                              href={publishStatus[i].link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline"
+                            >
+                              {publishStatus[i].linkLabel || "View"} →
+                            </a>
+                          </>
+                        )}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             ))}
