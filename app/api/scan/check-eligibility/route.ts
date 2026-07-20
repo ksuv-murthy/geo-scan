@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
+import { errorMessage } from "@/lib/error-message";
 
 // Lets the landing page show "Run free scan" vs "Pay ₹299 & run scan"
 // before the user commits — checked as they type their email, not just at
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ freeScanAvailable: (count || 0) === 0 });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
+      { error: errorMessage(err) },
       { status: 500 }
     );
   }

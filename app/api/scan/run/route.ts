@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
+import { errorMessage } from "@/lib/error-message";
 import {
   runPlatformCheck,
   generateSummary,
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest) {
       await supabase.from("scans").update({ scan_status: "error" }).eq("id", scanId);
     }
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
+      { error: errorMessage(err) },
       { status: 500 }
     );
   }

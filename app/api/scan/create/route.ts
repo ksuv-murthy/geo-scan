@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Razorpay from "razorpay";
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
+import { errorMessage } from "@/lib/error-message";
 
 // Creates a scan row, then either:
 //  - marks it paid immediately for free (first scan for this email — a
@@ -94,7 +95,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
+      { error: errorMessage(err) },
       { status: 500 }
     );
   }

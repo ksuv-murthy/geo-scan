@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
 import { publishToWordPress, buildHostedPageSlug, buildCopyPasteBlock } from "@/lib/publish-engine";
+import { errorMessage } from "@/lib/error-message";
 
 // Auto-implementation step: takes a drafted fix and ships it to wherever the
 // business actually has a presence — WordPress, our own hosted fallback
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (err) {
       status = "error";
-      errorMsg = err instanceof Error ? err.message : String(err);
+      errorMsg = errorMessage(err);
     }
 
     const { data: publish, error: insertError } = await supabase
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ publish });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
+      { error: errorMessage(err) },
       { status: 500 }
     );
   }

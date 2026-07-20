@@ -3,6 +3,8 @@
 // June 1 2026 (migrated to gemini-2.5-flash); gpt-4o-mini is deprecated
 // (migrated to gpt-5.4-nano, the current cheapest GPT-5.x tier).
 
+import { errorMessage } from "./error-message";
+
 export type Platform = "claude" | "openai" | "gemini" | "perplexity";
 
 export interface ScanRow {
@@ -147,7 +149,7 @@ export async function runPlatformCheck(
     else if (platform === "gemini") text = await callGemini(query);
     else if (platform === "perplexity") text = await callPerplexity(query);
   } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
+    error = errorMessage(err);
   }
   const isMentioned = !error && mentioned(text, name, domain);
   const compHits = !error ? competitors.filter((c) => mentioned(text, c)) : [];
@@ -253,7 +255,7 @@ export async function runCitationCheck(
       results.push({
         source: src.label,
         found: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
       });
     }
   }

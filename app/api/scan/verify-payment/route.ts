@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
+import { errorMessage } from "@/lib/error-message";
 
 // Verifies the Razorpay payment signature server-side (never trust the
 // client's word that a payment succeeded) and flips the scan to "paid".
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ verified: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
+      { error: errorMessage(err) },
       { status: 500 }
     );
   }
