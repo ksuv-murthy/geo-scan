@@ -8,6 +8,7 @@ import {
   runCitationCheck,
   Platform,
 } from "@/lib/scan-engine";
+import { runHealthCheck } from "@/lib/health-check";
 
 // Runs the full scan for a paid scan row: AI-mention checks across all four
 // platforms, the India citation-check, an AI-written summary, and drafted
@@ -69,12 +70,19 @@ export async function POST(req: NextRequest) {
     )?.[0];
     const citation = await runCitationCheck(scan.business_name, cityGuess);
 
+    // Website technical/SEO health check — independent of the AI-mention
+    // checks above, runs against the business's own domain if one was
+    // provided at intake. Failures here (missing schema, no HTTPS, etc.)
+    // often explain gaps seen in the AI-visibility rows.
+    const health = await runHealthCheck(scan.business_domain);
+
     const results = {
       platforms: platforms.map((p) => ({ claude: "Claude", openai: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity" }[p])),
       rows,
       summary,
       fixes,
       citation,
+      health,
       ts: Date.now(),
     };
 

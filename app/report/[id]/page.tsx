@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
+import ProjectTimeline from "../../components/ProjectTimeline";
 
 interface ScanRow {
   query: string;
@@ -23,12 +24,26 @@ interface CitationResult {
   link?: string;
   error?: string;
 }
+interface HealthCheckItem {
+  key: string;
+  label: string;
+  severity: "pass" | "warn" | "fail";
+  detail: string;
+}
+interface HealthCheckResult {
+  domain: string;
+  checkedUrl: string;
+  score: number;
+  items: HealthCheckItem[];
+  error?: string;
+}
 interface ScanResults {
   platforms: string[];
   rows: ScanRow[];
   summary: { summary: string; recommendations: string[] } | null;
   fixes: FixDraft[];
   citation: CitationResult[];
+  health?: HealthCheckResult | null;
   ts: number;
 }
 interface Scan {
@@ -273,6 +288,8 @@ export default function ReportPage() {
         </div>
       )}
 
+      <ProjectTimeline />
+
       <div className="bg-[#141E36] border border-[#1f2a45] rounded-2xl p-6 mb-8">
         <h3 className="font-medium mb-4">India citation footprint</h3>
         <div className="grid sm:grid-cols-2 gap-2">
@@ -284,6 +301,48 @@ export default function ReportPage() {
           ))}
         </div>
       </div>
+
+      {r.health && (
+        <div className="bg-[#141E36] border border-[#1f2a45] rounded-2xl p-6 mb-8">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-medium">Website health check</h3>
+            <span
+              className="font-mono text-sm font-bold"
+              style={{ color: r.health.score >= 70 ? "#2DD4BF" : r.health.score >= 40 ? "#F5A524" : "#FB7185" }}
+            >
+              {r.health.score}/100
+            </span>
+          </div>
+          <p className="text-sm text-[#93A0BE] mb-4">
+            Technical/SEO signals checked on {r.health.domain} — these often explain gaps seen above, since AI
+            platforms lean on the same on-page signals to decide what to cite.
+          </p>
+          {r.health.error ? (
+            <p className="text-sm text-red-400">{r.health.error}</p>
+          ) : (
+            <div className="space-y-2">
+              {r.health.items.map((item) => {
+                const color = item.severity === "pass" ? "#2DD4BF" : item.severity === "warn" ? "#F5A524" : "#FB7185";
+                const badge = item.severity === "pass" ? "Pass" : item.severity === "warn" ? "Warn" : "Fail";
+                return (
+                  <div key={item.key} className="border border-[#1f2a45] rounded-lg px-3 py-2">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-sm font-medium">{item.label}</span>
+                      <span
+                        className="text-[10px] font-mono px-2 py-0.5 rounded-full"
+                        style={{ color, background: `${color}1a` }}
+                      >
+                        {badge}
+                      </span>
+                    </div>
+                    <p className="text-[12px] text-[#93A0BE] leading-relaxed">{item.detail}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="bg-[#141E36] border border-[#1f2a45] rounded-2xl p-6 mb-8 overflow-x-auto">
         <h3 className="font-medium mb-4">Full results</h3>

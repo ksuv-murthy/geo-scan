@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
-import { publishToWordPress, buildHostedPageSlug, buildCopyPasteBlock } from "@/lib/publish-engine";
+import { publishToWordPress, buildHostedPageSlug, buildCopyPasteBlock, buildFixHtml } from "@/lib/publish-engine";
 import { errorMessage } from "@/lib/error-message";
 
 // Auto-implementation step: takes a drafted fix and ships it to wherever the
@@ -34,7 +34,16 @@ export async function POST(req: NextRequest) {
         if (!wordpress?.siteUrl || !wordpress?.username || !wordpress?.appPassword) {
           throw new Error("WordPress site URL, username, and application password are required");
         }
-        const content = `<h2>${fix.question}</h2><p>${fix.answer}</p>${fix.schema}`;
+        // Final HTML: properly marked-up FAQ fragment (schema.org microdata
+        // + JSON-LD) instead of a bare h2/p/script concat, so what actually
+        // lands in WP is the same well-formed markup used everywhere else.
+        const content = buildFixHtml({
+          businessName: scan.business_name,
+          businessDomain: scan.business_domain,
+          question: fix.question,
+          answer: fix.answer,
+          schema: fix.schema,
+        });
         const result = await publishToWordPress({
           siteUrl: wordpress.siteUrl,
           username: wordpress.username,
@@ -50,7 +59,17 @@ export async function POST(req: NextRequest) {
         // this publishes row back out — no separate file storage needed.
         destinationMeta = { slug, url: `/p/${slug}` };
       } else if (destination === "copy_paste") {
-        destinationMeta = { block: buildCopyPasteBlock(fix.question, fix.answer, fix.schema) };
+        destinationMeta = {
+          block: buildCopyPasteBlock(fix.question, fix.answer, fix.schema),
+          html: buildFixHtml({
+            businessName: scan.business_name,
+            businessDomain: scan.business_domain,
+            question: fix.question,
+            answer: fix.answer,
+            schema: fix.schema,
+            standalone: true,
+          }),
+        };
       } else {
         throw new Error(`Unknown destination: ${destination}`);
       }
