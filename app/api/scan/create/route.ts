@@ -25,6 +25,16 @@ export async function POST(req: NextRequest) {
     const supabase = createSupabaseServiceClient();
     const AMOUNT_PAISE = 29900; // Rs 299.00 flat
 
+    // Demo/testing accounts — unlimited free scans, no payment ever. Set via
+    // DEMO_EMAILS env var as a comma-separated list (e.g.
+    // "ksuvmurthy@gmail.com,other@example.com"). Not a code-level hack —
+    // this is meant to stay configurable for whoever needs demo access.
+    const demoEmails = (process.env.DEMO_EMAILS || "")
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    const isDemoAccount = demoEmails.includes(email.trim().toLowerCase());
+
     // Has this email ever had a paid (or free-first) scan before?
     const { count: priorPaidCount } = await supabase
       .from("scans")
@@ -32,7 +42,7 @@ export async function POST(req: NextRequest) {
       .eq("email", email)
       .eq("payment_status", "paid");
 
-    const isFreeFirstScan = (priorPaidCount || 0) === 0;
+    const isFreeFirstScan = isDemoAccount || (priorPaidCount || 0) === 0;
 
     const { data: scan, error: dbError } = await supabase
       .from("scans")
